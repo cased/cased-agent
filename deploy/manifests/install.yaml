@@ -1,0 +1,142 @@
+# Cased Agent - Kubernetes Metrics Collector
+# Install: kubectl apply -f https://raw.githubusercontent.com/cased/cased-agent/main/deploy/manifests/install.yaml
+# Then create the secret: kubectl -n cased-system create secret generic cased-agent --from-literal=api-key=YOUR_API_KEY
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cased-system
+  labels:
+    app.kubernetes.io/name: cased-agent
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cased-agent
+  namespace: cased-system
+  labels:
+    app.kubernetes.io/name: cased-agent
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cased-agent
+  labels:
+    app.kubernetes.io/name: cased-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cased-agent
+  labels:
+    app.kubernetes.io/name: cased-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cased-agent
+subjects:
+  - kind: ServiceAccount
+    name: cased-agent
+    namespace: cased-system
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cased-agent
+  namespace: cased-system
+  labels:
+    app.kubernetes.io/name: cased-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cased-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cased-agent
+    spec:
+      serviceAccountName: cased-agent
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: agent
+          image: ghcr.io/cased/cased-agent:latest
+          imagePullPolicy: Always
+          env:
+            - name: CASED_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cased-agent
+                  key: api-key
+            - name: CASED_API_ENDPOINT
+              value: "https://app.cased.com"
+            - name: CASED_CLUSTER_ID
+              value: "default"  # Change this to your cluster name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ENABLE_EBPF
+              value: "true"
+            - name: PROC_PATH
+              value: /host/proc
+            - name: CGROUP_PATH
+              value: /host/sys/fs/cgroup
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroup
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            - name: debugfs
+              mountPath: /sys/kernel/debug
+              readOnly: true
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug

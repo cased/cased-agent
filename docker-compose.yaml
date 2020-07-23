@@ -1,0 +1,89 @@
+# Local development setup for cased-agent
+# Runs the agent in a Linux container with cgroup access
+
+services:
+  # The metrics agent
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - CASED_API_ENDPOINT=http://host.docker.internal:8000
+      - CASED_API_KEY=${CASED_API_KEY:-bFTw2c00znFGnolNCXqsmuAjjQ8OaXBa}
+      - CASED_CLUSTER_ID=local-docker
+      - NODE_NAME=docker-desktop
+      - ENABLE_OTEL=true
+    volumes:
+      # Mount host cgroups (works on Docker Desktop for Mac/Windows)
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      # Mount /proc for node-level metrics
+      - /proc:/host/proc:ro
+    ports:
+      # OpenTelemetry receiver port
+      - "4318:4318"
+    # Run every 5 seconds for local dev
+    command: ["--interval=5s", "--batch-size=50", "--proc-path=/host/proc", "--enable-otel"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Privileged mode required for eBPF (optional - only needed with --enable-ebpf)
+    # privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+
+  # A sample workload to generate metrics
+  workload:
+    image: alpine:3.19
+    command: |
+      sh -c "
+        echo 'Starting sample workload...'
+        while true; do
+          # CPU stress
+          dd if=/dev/zero of=/dev/null bs=1M count=100 2>/dev/null
+          # Memory allocation
+          head -c 10M /dev/urandom > /tmp/test 2>/dev/null
+          rm -f /tmp/test
+          sleep 2
+        done
+      "
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+
+  # Sample web service with OTel tracing
+  web:
+    image: python:3.12-slim
+    environment:
+      - OTEL_ENDPOINT=http://agent:4318/v1/traces
+    volumes:
+      - ./demo_web.py:/app/demo_web.py:ro
+    command: >
+      sh -c "pip install -q opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp-proto-http && python /app/demo_web.py"
+    ports:
+      - "8081:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Traffic generator to hit the web service
+  traffic:
+    image: alpine:3.19
+    depends_on:
+      - web
+    command: |
+      sh -c "
+        apk add --no-cache curl
+        sleep 10
+        echo 'Starting traffic generator...'
+        while true; do
+          curl -s http://web:8080/ > /dev/null
+          curl -s http://web:8080/api/users > /dev/null
+          curl -s http://web:8080/api/orders > /dev/null
+          curl -s http://web:8080/health > /dev/null
+          sleep 0.5
+        done
+      "

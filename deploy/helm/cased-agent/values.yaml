@@ -1,0 +1,53 @@
+# Cased Agent Helm Values
+
+# Required: Your Cased API key
+apiKey: ""
+
+# Required: Cluster identifier (e.g., "prod", "staging")
+clusterId: ""
+
+# Optional: Cased API endpoint
+apiEndpoint: "https://app.cased.com"
+
+# Image configuration
+image:
+  repository: ghcr.io/cased/cased-agent
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Resource limits
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Collection interval
+collectionInterval: "15s"
+
+# Enable eBPF HTTP tracing (requires privileged mode)
+ebpf:
+  enabled: true
+
+# Enable OpenTelemetry receiver
+otel:
+  enabled: false
+  port: 4318
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations (to run on all nodes including masters)
+tolerations:
+  - operator: Exists
+
+# Pod annotations
+podAnnotations: {}
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

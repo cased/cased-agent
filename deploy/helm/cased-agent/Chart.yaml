@@ -1,0 +1,18 @@
+apiVersion: v2
+name: cased-agent
+description: Kubernetes metrics collector for Cased observability
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - monitoring
+  - observability
+  - metrics
+  - kubernetes
+home: https://cased.com
+sources:
+  - https://github.com/cased/cased-agent
+maintainers:
+  - name: Cased
+    email: support@cased.com
+    url: https://cased.com

@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cased-agent.fullname" . }}
+  labels:
+    {{- include "cased-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "cased-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cased-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cased-agent.serviceAccountName" . }}
+      hostPID: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --interval={{ .Values.collectionInterval }}
+          env:
+            - name: CASED_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cased-agent.fullname" . }}
+                  key: api-key
+            - name: CASED_API_ENDPOINT
+              value: {{ .Values.apiEndpoint | quote }}
+            - name: CASED_CLUSTER_ID
+              value: {{ required "clusterId is required" .Values.clusterId | quote }}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ENABLE_EBPF
+              value: {{ .Values.ebpf.enabled | quote }}
+            - name: ENABLE_OTEL
+              value: {{ .Values.otel.enabled | quote }}
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_PORT
+              value: {{ .Values.otel.port | quote }}
+            {{- end }}
+            - name: PROC_PATH
+              value: /host/proc
+            - name: CGROUP_PATH
+              value: /host/sys/fs/cgroup
+          securityContext:
+            {{- if .Values.ebpf.enabled }}
+            privileged: true
+            {{- else }}
+            capabilities:
+              add:
+                - SYS_PTRACE
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroup
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            {{- if .Values.ebpf.enabled }}
+            - name: debugfs
+              mountPath: /sys/kernel/debug
+              readOnly: true
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        {{- if .Values.ebpf.enabled }}
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
+        {{- end }}
